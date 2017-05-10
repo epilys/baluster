@@ -26,7 +26,9 @@ main = do
 
 processTCP (socket,remoteAddr) = do
                              putStrLn $ "TCP from " ++ show remoteAddr
-                             paste <- recv socket 2147483647
+														 -- sqlite3 text limit is 2147483647, or 2.1GB
+														 -- accept up to 500KB:
+                             paste <- recv socket 500000
                              case paste of
                                 Just p -> insertPaste p socket
                                 Nothing -> return ()

@@ -1,0 +1,27 @@
+																	BALUSTER
+
+SETUP
+-----
+# set host to 0.0.0.0 in `serve (Host "127.0.0.1") "8888" processTCP` if necessary
+cabal install -j
+sh init.sh
+./.cabal-sandbox/bin/baluster
+
+NGINX PROXY
+-----------
+
+limit_req_zone $binary_remote_addr zone=paste:10m rate=1r/s;
+
+....
+
+server {
+	.....
+
+	location /paste/ {
+		limit_req zone=paste burst=5;
+		proxy_pass http://127.0.0.1:9999/;
+	}
+	.....
+
+}
+....
