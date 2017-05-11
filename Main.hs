@@ -1,24 +1,30 @@
 {-# LANGUAGE OverloadedStrings #-}
  
-import Network.Wai
-import Network.Wai.Handler.Warp
-import Network.HTTP.Types (status200)
+import Network.Wai (responseBuilder, pathInfo)
+import Network.Wai.Handler.Warp (run)
+import Network.HTTP.Types (status200, status404, status400)
 import Blaze.ByteString.Builder (copyByteString)
 import qualified Data.ByteString.UTF8 as BU
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString
-import qualified Data.ByteString.Char8
-import Data.Monoid
+import qualified Data.ByteString.Char8 as C
+
+import Data.ByteString.Base16 as B16
+import Data.Monoid (mconcat)
 import qualified Database.HDBC
-import qualified Database.HDBC.Sqlite3
-import Data.Time.Clock.POSIX
+import Database.HDBC.Sqlite3 (connectSqlite3)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 
 
-import Network.Simple.TCP
+import Network.Simple.TCP (serve, HostPreference(Host), Socket, send, recv)
 import Control.Concurrent (forkIO)
 import Text.Read (readMaybe)
 -- for path unpack : Text->String
 import qualified Data.Text as T
+
+-- for url timestamp salt
+import System.Random (newStdGen, randomR)
+
+-- for showHex
+import Numeric (showHex)
 
 main = do
     forkIO httpMain
@@ -26,34 +32,28 @@ main = do
 
 processTCP (socket,remoteAddr) = do
                              putStrLn $ "TCP from " ++ show remoteAddr
-														 -- sqlite3 text limit is 2147483647, or 2.1GB
-														 -- accept up to 500KB:
+                             -- sqlite3 text limit is 2147483647, or 2.1GB
+                             -- accept up to 500KB:
                              paste <- recv socket 500000
                              case paste of
-                                Just p -> insertPaste p socket
                                 Nothing -> return ()
+                                Just p -> insertPaste p socket
 
-insertPaste :: Data.ByteString.Char8.ByteString -> Socket -> IO ()
+
+insertPaste :: C.ByteString -> Socket -> IO ()
 insertPaste string socket = do 
-               --Data.ByteString.putStrLn string
-               conn <- Database.HDBC.Sqlite3.connectSqlite3 "baluster.db"
+               conn <- connectSqlite3 "baluster.db"
                posixTimestamp <- getPOSIXTime
-               let timestamp = round $ posixTimestamp::Integer
-               Database.HDBC.run conn "INSERT INTO baluster (content,timestamp) VALUES (?,?)" [Database.HDBC.toSql $ BU.toString string, Database.HDBC.toSql timestamp]
+               let timestamp = round $ posixTimestamp::Int
+               generator <- newStdGen -- create a random generator
+               let ifd = (fst $ randomR (0, 16777215) generator) ::Integer
+               let id = (showHex $ ifd) "" 
+               Database.HDBC.run conn "INSERT INTO baluster (id, content,timestamp) VALUES (?,?,?)" [Database.HDBC.toSql id, Database.HDBC.toSql $ BU.toString string, Database.HDBC.toSql timestamp]
                Database.HDBC.commit conn
-               r <- Database.HDBC.quickQuery' conn "SELECT id FROM baluster WHERE timestamp = ?;" [Database.HDBC.toSql timestamp]
-               let stringRows = map convRow r
-               let idToReturn =  stringRows !! 0
-               let url = "http://localhost:9999/" ++ idToReturn ++ "\n"
-               putStrLn $ "Added paste at " ++ url
-               send socket $ Data.ByteString.Char8.pack url
                Database.HDBC.disconnect conn
-               where 
-                convRow :: [Database.HDBC.SqlValue] -> String
-                convRow [id] = case Database.HDBC.fromSql id of 
-                                Just x -> show (x::Integer)
-                                Nothing -> "NULL"
-                convRow x = fail $ "unexpected result: " ++ show x 
+               let url = "http://localhost:9999/" ++ id ++ "\n"
+               putStr $ "Added paste at " ++ url
+               send socket $ C.pack url
 
 httpMain :: IO ()                             
 httpMain = do
@@ -62,12 +62,15 @@ httpMain = do
     run port app
 
 
-slugToNumber :: [T.Text] -> Maybe Integer
-slugToNumber s = (readMaybe $ T.unpack $ s !! 0) :: Maybe Integer
+slugToNumber :: [T.Text] -> Maybe String
+slugToNumber s = case B16.decode . C.pack $ slug of
+                  (_, "") -> Just slug
+                  _ -> Nothing
+                 where slug = T.unpack (s !! 0)
 
-idToText :: Integer -> IO (Maybe String)
+idToText :: String -> IO (Maybe String)
 idToText i = do
-          conn <- Database.HDBC.Sqlite3.connectSqlite3 "baluster.db"
+          conn <- connectSqlite3 "baluster.db"
           r <- Database.HDBC.quickQuery' conn "SELECT content FROM baluster WHERE id = ?;" [Database.HDBC.toSql i]
           case length r of
             0 -> return Nothing
@@ -81,7 +84,6 @@ idToText i = do
 
 app req respond = do
                 let slug = pathInfo req
-                -- putStrLn $ show $ slug !! 0
                 case length slug of
                   1 -> case slugToNumber slug of
                           Just i -> do
@@ -90,11 +92,11 @@ app req respond = do
                           Nothing -> respond nay
                   _ -> respond nay
 
-nay = responseBuilder status200 [ ("Content-Type", "text/plain") ] $ mconcat $ map copyByteString
+nay = responseBuilder status400 [ ("Content-Type", "text/plain") ] $ mconcat $ map copyByteString
     [ "Accepted url: http://localhost:9999/<number>\n"
     , "Pipe your paste to localhost:8888\n" ]
 
-index i Nothing =  responseBuilder status200 [("Content-Type", "text/plain")] $ mconcat $ map copyByteString
+index i Nothing =  responseBuilder status404 [("Content-Type", "text/plain")] $ mconcat $ map copyByteString
     [ "paste with id ", BU.fromString $ show i, " not found"]
 index i (Just text) = responseBuilder status200 [("Content-Type", "text/plain")] $ mconcat $ map copyByteString
     [ BU.fromString text  ]

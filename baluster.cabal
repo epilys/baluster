@@ -62,7 +62,7 @@ executable baluster
   other-extensions:    OverloadedStrings
   
   -- Other library packages from which modules are imported.
-  build-depends:       base >=4.6 && <4.7, warp >= 3.2, bytestring, blaze-builder >= 0.4.0.2, http-types >= 0.9.1, wai >= 3.2.1.1, utf8-string, HDBC, HDBC-sqlite3, network-simple >= 0.4.0.5, time, text
+  build-depends:       base >=4.6 && <4.7, warp >= 3.2, bytestring, blaze-builder >= 0.4.0.2, http-types >= 0.9.1, wai >= 3.2.1.1, utf8-string, HDBC, HDBC-sqlite3, network-simple >= 0.4.0.5, time, text, base16-bytestring >= 0.1.1.6, random, ConfigFile >= 1.1.4
   
   -- Directories containing source files.
   -- hs-source-dirs:      
