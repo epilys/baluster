@@ -1,41 +1,38 @@
 {-# LANGUAGE OverloadedStrings #-}
- 
-import Network.Wai (responseBuilder, pathInfo)
-import Network.Wai.Handler.Warp (run)
-import Network.HTTP.Types (status200, status404, status400)
-import Blaze.ByteString.Builder (copyByteString)
-import qualified Data.ByteString.UTF8 as BU
-import qualified Data.ByteString.Char8 as C
 
-import Data.ByteString.Base16 as B16
-import Data.Monoid (mconcat)
+import           Blaze.ByteString.Builder (copyByteString)
+import           Control.Concurrent       (forkIO)
+import           Data.ByteString.Base16   as B16
+import qualified Data.ByteString.Char8    as C
+import qualified Data.ByteString.UTF8     as BU
+import           Data.Monoid              (mconcat)
+import qualified Data.Text                as T
+import           Data.Time.Clock.POSIX    (getPOSIXTime)
 import qualified Database.HDBC
-import Database.HDBC.Sqlite3 (connectSqlite3)
-import Data.Time.Clock.POSIX (getPOSIXTime)
+import           Database.HDBC.Sqlite3    (connectSqlite3)
+import           Network.HTTP.Types       (status200, status400, status404)
+import           Network.Simple.TCP       (HostPreference (Host), Socket, recv,
+                                           send, serve)
+import           Network.Wai              (Application, pathInfo,
+                                           responseBuilder)
+import           Network.Wai.Handler.Warp (run)
+import           Network.Wai.Internal     (Request, Response)
+import           Numeric                  (showHex)
+import           System.Random            (newStdGen, randomR)
 
-
-import Network.Simple.TCP (serve, HostPreference(Host), Socket, send, recv)
-import Control.Concurrent (forkIO)
-
--- for path unpack : Text->String
-import qualified Data.Text as T
-
--- for url
-import System.Random (newStdGen, randomR)
-
-import Numeric (showHex)
-
-{- 
- - baluster - TCP pastebin server. 
+{-
+ - baluster - TCP pastebin server.
  - * serves pastes over http
  - * accepts pastes over tcp (eg. with netcat)
- - 
+ -
  - example usage: echo -n test | nc localhost 8888
  -}
+main :: IO ()
 main = do
     forkIO httpMain -- process http requests (serving pastes) in a different thread
     serve (Host "127.0.0.1") "8888" processTCP -- accept TCP connections for incoming pastes
 
+processTCP :: Show a => (Socket, a) -> IO ()
 processTCP (socket,remoteAddr) = do
                              putStrLn $ "TCP from " ++ show remoteAddr
                              -- sqlite3 text limit is 2147483647, or 2.1GB
@@ -52,7 +49,7 @@ processTCP (socket,remoteAddr) = do
  - * save timestamp to clean up old pastes with a cron job
  -}
 insertPaste :: C.ByteString -> Socket -> IO ()
-insertPaste string socket = do 
+insertPaste string socket = do
                conn <- connectSqlite3 "baluster.db"
                posixTimestamp <- getPOSIXTime -- get timestamp for db entry
                let timestamp = round $ posixTimestamp::Int -- convert to integer
@@ -66,7 +63,7 @@ insertPaste string socket = do
                putStr $ "Added paste at " ++ url
                send socket $ C.pack url
 
-httpMain :: IO ()                             
+httpMain :: IO ()
 httpMain = do
     let port = 9999
     putStrLn $ "Listening on port " ++ show port
@@ -94,15 +91,16 @@ idToText i = do
           case length r of
             0 -> return Nothing
             _ -> return $ convRow $ r !! 0
-          where 
+          where
             convRow :: [Database.HDBC.SqlValue] -> Maybe String
             convRow [c] = Database.HDBC.fromSql c
-            convRow x = fail $ "unexpected result: " ++ show x 
+            convRow x = fail $ "unexpected result: " ++ show x
 
-{- 
+{-
  - Get the request, extract the paste id (in hex form) from tthe path,
  - and return an appropriate response
  -}
+app :: Network.Wai.Application
 app req respond = do
                 let slug = pathInfo req
                 case length slug of
@@ -116,6 +114,7 @@ app req respond = do
 {-
  - Return 400 to user with information
  -}
+nay :: Response
 nay = responseBuilder status400 [ ("Content-Type", "text/plain") ] $ mconcat $ map copyByteString
     [ "Accepted url: http://localhost:9999/<number>\n"
     , "echo -n your paste | nc localhost 8888\n"]
@@ -123,6 +122,7 @@ nay = responseBuilder status400 [ ("Content-Type", "text/plain") ] $ mconcat $ m
 {-
  - Return the paste or 404 if it's not found in the database
  -}
+index :: String -> Maybe String -> Response
 index i Nothing =  responseBuilder status404 [("Content-Type", "text/plain")] $ mconcat $ map copyByteString
     [ "paste with id ", BU.fromString $ show i, " not found"]
 index i (Just text) = responseBuilder status200 [("Content-Type", "text/plain")] $ mconcat $ map copyByteString
