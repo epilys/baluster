@@ -7,6 +7,21 @@ cabal install -j
 sh init.sh
 ./.cabal-sandbox/bin/baluster
 
+"PRODUCTION" SETUP
+------------------
+
+mkdir -p /opt/baluster
+cp .cabal-sandbox/bin/baluster /opt/baluster/baluster
+cp baluster.db /opt/baluster/baluster.db
+chown -R www-data:www-data /opt/baluster
+cp baluster.service /etc/systemd/system/baluster.service
+systemctl daemon-reload
+systemctl enable baluster
+systemctl start baluster
+#add cron cleanup (see cron.sh) (Port scans will fill up your database!)
+#configure nginx proxy (see below)
+#open TCP port in iptables
+
 NGINX PROXY
 -----------
 

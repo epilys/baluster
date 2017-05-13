@@ -1,0 +1,14 @@
+[Unit]
+Description=baluster daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/baluster
+ExecStart=/opt/baluster/baluster
+ExecStop=/bin/kill -15 $MAINPID
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=default.target

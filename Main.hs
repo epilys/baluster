@@ -97,7 +97,7 @@ idToText i = do
             convRow x = fail $ "unexpected result: " ++ show x
 
 {-
- - Get the request, extract the paste id (in hex form) from tthe path,
+ - Get the request, extract the paste id (in hex form) from the path,
  - and return an appropriate response
  -}
 app :: Network.Wai.Application
